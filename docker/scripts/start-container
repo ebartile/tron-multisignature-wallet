@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+trap exit SIGINT SIGTERM
+set -euo pipefail
+
+usermod -ou "$HOST_UID" server
+groupmod -og "$HOST_GID" server
+
+RUN="gosu server"
+
+if [ ! -e "$INSTALLED_FILE" ]; then
+	eval "$RUN" mkdir -p storage
+
+	if [ "$NODE_ENV" == "production" ]; then
+	    eval "$RUN" npm ci --omit=dev
+	fi
+
+	if [ "$NODE_ENV" == "development" ]; then
+	    eval "$RUN" npm install
+	fi
+
+	echo ":$(date)" >"$INSTALLED_FILE"
+fi
+
+eval "$RUN" node src/app.js
+
+

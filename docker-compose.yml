@@ -1,0 +1,68 @@
+services:
+    mongo:
+        image: 'mongo:${MONGO_VERSION:-6}'
+        command: --auth --noscripting
+        restart: unless-stopped
+        environment:
+            MONGO_INITDB_DATABASE: '${DB_DATABASE:-ethereum}'
+            MONGO_INITDB_ROOT_USERNAME: '${DB_USERNAME:-ethereum}'
+            MONGO_INITDB_ROOT_PASSWORD: '${DB_PASSWORD:-secret}'
+        volumes:
+            - 'tron-mongo:/data/db'
+            - 'tron-mongo-config:/data/configdb'
+        networks:
+            - tron
+        ports:
+          - '27017:27017'
+        healthcheck:
+            test: [ "CMD-SHELL", "echo 'db.stats().ok' | mongosh localhost:27017/test --quiet"]
+            start_period: 40s
+
+    tron-api:
+        build:
+            context: ./docker
+            dockerfile: Dockerfile
+            args:
+                APP_ENV: '${APP_ENV:-local}'
+                NODE_VERSION: '${NODE_VERSION:-16}'
+        image: tron/tron-api
+        pull_policy: never
+        restart: unless-stopped
+        environment:
+            HOST_UID: '${HOST_UID:-1000}'
+            HOST_GID: '${HOST_GID:-1000}'
+            TRON_MONGODB_URL: '${MONGODB_URL:-mongodb://$DB_USERNAME:$DB_PASSWORD@mongo:27017}'
+            TRON_MONGODB_NAME: 'tron-api'
+            TRON_API_HOST: '${TRON_API_HOST:-https://api.trongrid.io}'
+            TRON_API_KEY: '${TRON_API_KEY}'
+            TRON_API_HEADER: '${TRON_API_HEADER:-TRON-PRO-API-KEY}'
+            TRON_STORAGE_PATH: '${TRON_STORAGE_PATH:-/home/node/app/storage/tron}'
+            TRON_KEYPATH: '${TRON_KEYPATH}'
+            TRON_CRTPATH: '${TRON_CRTPATH}'
+            TRON_LOGFILE: '${TRON_LOGFILE}'
+            TRON_BIND: '${TRON_BIND:-localhost}'
+            TRON_PORT: '${TRON_PORT:-6000}'
+        volumes:
+            -   type: bind
+                source: '.'
+                target: '/home/node/app'
+            -   type: bind
+                source: '${HOME}/.npm'
+                target: '/tmp/.npm'
+        networks:
+            - tron
+        ports:
+          - '6000:6000'
+        healthcheck:
+            test: [ "CMD-SHELL", "curl --fail http://localhost:6000/ping || exit 1" ]
+            start_period: 2m
+
+networks:
+    tron:
+        driver: bridge
+
+volumes:
+    tron-mongo:
+        driver: local
+    tron-mongo-config:
+        driver: local

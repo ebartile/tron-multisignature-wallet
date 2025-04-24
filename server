@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DOCKER_INPUT_FLAG="$(if [ -t 0 ]; then echo "-it"; fi)"
+
+export NODE_VERSION=${NODE_VERSION:-"22"}
+export MONGO_VERSION=${MONGO_VERSION:-"6"}
+export COMPOSE_FILE=docker-compose.yml
+
+# Define environment variables...
+export MONGO_SERVICE="mongo"
+export STOP_TIMEOUT=${STOP_TIMEOUT:-360}
+export HOST_UID=${HOST_UID:-$(id -u)}
+export HOST_GID=${HOST_GID:-$(id -g)}
+export APP_USER=server
+
+# Define reusable functions
+function runtime_error() {
+	echo -e "Error: $1" >&2 && exit 1
+}
+
+function check_service() {
+	if [ -z "$(docker compose ps -q --status=running "$1" 2>/dev/null)" ]; then
+		runtime_error "Service [$1] is not running."
+	fi
+}
+
+function container_exec() {
+	if [ ! -t 0 ]; then
+		docker compose exec -T "$@"
+	else
+		docker compose exec "$@"
+	fi
+}
+
+if [[ $EUID -eq 0 ]]; then
+	runtime_error "You cannot start server as root."
+fi
+
+UNAMEOUT="$(uname -s)"
+
+# Verify operating system is supported...
+case "${UNAMEOUT}" in
+Linux*) MACHINE=linux ;;
+Darwin*) MACHINE=mac ;;
+*) MACHINE="UNKNOWN" ;;
+esac
+
+if [ "$MACHINE" == "UNKNOWN" ]; then
+	runtime_error "Unsupported operating system [$(uname -s)]."
+fi
+
+# Ensure Docker is running...
+if ! docker info >/dev/null 2>&1; then
+	runtime_error "Docker is not running."
+fi
+
+# Create home directories
+mkdir -p "${HOME}/.npm"
+
+NODE_CMD="docker run --rm $DOCKER_INPUT_FLAG \
+--user $(id -u):$(id -g) \
+--env npm_config_cache=/tmp/.npm \
+--env GIT_CONFIG_COUNT=1 \
+--env GIT_CONFIG_KEY_0=safe.directory \
+--env GIT_CONFIG_VALUE_0=* \
+--volume ${NPM_CONFIG_CACHE:-$HOME/.npm}:/tmp/.npm \
+--volume $(pwd):/usr/src/app \
+--workdir /usr/src/app \
+node:${NODE_VERSION}"
+
+if [ $# -gt 0 ]; then
+	if [ "$1" == "initialize" ]; then
+		if [ ! -f .env ]; then
+            if [ ! -d node_modules ]; then
+                echo "Node modules not found. Installing..."
+                # Run the Docker command
+                $NODE_CMD bash -c "npm install"
+            fi
+
+			cp .env.sample .env
+
+			# eval "$PHP_CMD" artisan key:generate --force
+
+			echo -e ".env initialized"
+		else
+			echo -e ".env file exists"
+		fi
+	else
+		# Source Laravel environment files
+		if [ ! -f .env ]; then
+			runtime_error ".env file does not exist."
+		fi
+
+		source .env
+
+		# Update images and reinstall composer
+		if [ "$1" == "update" ]; then
+			docker pull "node:${NODE_VERSION}"
+			docker compose build
+			eval "$NODE_CMD" npm install
+
+		# Force recreate containers
+		elif [ "$1" == "recreate" ]; then
+			shift 1
+
+			exec docker compose up -d \
+				--timeout="$STOP_TIMEOUT" \
+				--force-recreate "$@"
+
+		# Set timeout to stop command
+		elif [ "$1" == "stop" ]; then
+			shift 1
+
+			exec docker compose stop \
+				--timeout="$STOP_TIMEOUT" "$@"
+
+		# Proxy Node commands to the "node" binary on the application container...
+		elif [ "$1" == "node" ]; then
+			shift 1
+			check_service "$APP_SERVICE"
+
+			container_exec \
+				-u "$APP_USER" \
+				"$APP_SERVICE" \
+				node "$@"
+
+		# Proxy NPM commands to the "npm" binary on the application container...
+		elif [ "$1" == "npm" ]; then
+			shift 1
+			check_service "$APP_SERVICE"
+
+			container_exec \
+				-u "$APP_USER" \
+				"$APP_SERVICE" \
+				npm "$@"
+
+		# Proxy NPX commands to the "npx" binary on the application container...
+		elif [ "$1" == "npx" ]; then
+			shift 1
+			check_service "$APP_SERVICE"
+
+			container_exec \
+				-u "$APP_USER" \
+				"$APP_SERVICE" \
+				npx "$@"
+
+		# Initiate a mongosh terminal session within the "mongo" container...
+		elif [ "$1" == "mongosh" ]; then
+			shift 1
+			check_service "$MONGO_SERVICE"
+
+			container_exec \
+				"$MONGO_SERVICE" mongosh \
+				-u "$DB_USERNAME" \
+				-p "$DB_PASSWORD" \
+				--authenticationDatabase admin \
+				"$DB_DATABASE" "$@"
+
+		# Initiate a mongodump terminal session within the "mongo" container...
+		elif [ "$1" == "mongodump" ]; then
+			shift 1
+			check_service "$MONGO_SERVICE"
+
+			container_exec \
+				"$MONGO_SERVICE" mongodump "$@"
+
+		# Initiate a Bash shell within the application container...
+		elif [ "$1" == "shell" ] || [ "$1" == "bash" ]; then
+			shift 1
+			check_service "$APP_SERVICE"
+
+			container_exec \
+				-u "$APP_USER" \
+				"$APP_SERVICE" \
+				bash "$@"
+
+		# Initiate a root user Bash shell within the application container...
+		elif [ "$1" == "root-shell" ] || [ "$1" == "root-bash" ]; then
+			shift 1
+			check_service "$APP_SERVICE"
+
+			container_exec \
+				"$APP_SERVICE" \
+				bash "$@"
+
+		# Pass unknown commands to the "docker compose"...
+		else
+			exec docker compose "$@"
+		fi
+	fi
+else
+	exec docker compose ps
+fi
