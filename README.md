@@ -41,6 +41,7 @@ This project is designed for server-side use by web developers managing Tron wal
     #  Tron Config
     #  (refer to our doc)
     #--------------------------------------------------------------------------
+    APP_ENV=development
     DB_DATABASE=tron-api
     DB_USERNAME=root
     DB_PASSWORD=password
@@ -52,7 +53,6 @@ This project is designed for server-side use by web developers managing Tron wal
     TRON_LOGFILE=tron.log
     TRON_KEYPATH=
     TRON_CRTPATH=
-    TRON_ENV=test
     TRON_BIND=localhost
     TRON_PORT=6000
     ```

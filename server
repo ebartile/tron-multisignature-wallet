@@ -94,6 +94,13 @@ if [ $# -gt 0 ]; then
 
 		source .env
 
+		# Set compose file to use based on environment
+		if [ "$APP_ENV" != "development" ]; then
+			if [ -f docker-compose.dev.yml ]; then
+				export COMPOSE_FILE=$COMPOSE_FILE:docker-compose.dev.yml
+			fi
+		fi
+
 		# Update images and reinstall composer
 		if [ "$1" == "update" ]; then
 			docker pull "node:${NODE_VERSION}"

@@ -1,0 +1,29 @@
+services:
+    mongo:
+        image: 'mongo:${MONGO_VERSION:-6}'
+        command: --auth --noscripting
+        restart: unless-stopped
+        environment:
+            MONGO_INITDB_DATABASE: '${DB_DATABASE:-ethereum}'
+            MONGO_INITDB_ROOT_USERNAME: '${DB_USERNAME:-ethereum}'
+            MONGO_INITDB_ROOT_PASSWORD: '${DB_PASSWORD:-secret}'
+        volumes:
+            - 'wallets-mongo:/data/db'
+            - 'wallets-mongo-config:/data/configdb'
+        networks:
+            - wallets
+        ports:
+          - '27017:27017'
+        healthcheck:
+            test: [ "CMD-SHELL", "echo 'db.stats().ok' | mongosh localhost:27017/test --quiet"]
+            start_period: 40s
+
+networks:
+    wallets:
+        driver: bridge
+
+volumes:
+    wallets-mongo:
+        driver: local
+    wallets-mongo-config:
+        driver: local
